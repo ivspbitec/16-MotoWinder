@@ -1,23 +1,38 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ArduinoJson.h>
+#include <U8g2_for_Adafruit_GFX.h>
 
-#define STEP_PIN 2    // Пин для STEP драйвера A4988
-#define DIR_PIN 3     // Пин для DIR драйвера A4988
-#define BUTTON_PIN 4  // Пин для кнопки
-#define STEPS_PER_REV 800  // Количество шагов на один оборот двигателя
-#define LED_PIN 8 // Встроенный светодиод на ESP32
+#define STEP_PIN 2        // Пин для STEP драйвера A4988
+#define DIR_PIN 3         // Пин для DIR драйвера A4988
+#define BUTTON_PIN 4      // Пин для кнопки
+#define STEPS_PER_REV 800 // Количество шагов на один оборот двигателя
+#define LED_PIN 8         // Встроенный светодиод на ESP32
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
 
-int frequency = 0;         // Начальная частота ШИМ (частота шагов)
-int maxFrequency = 9500;      // Максимальная частота ШИМ для полной скорости
-int accelDelay = 15;          // Задержка для плавного изменения скорости (мс)
-int accelStep = 100;          // Задержка для плавного изменения скорости (мс)
-bool isRunning = false;       // Флаг состояния работы моталки
-unsigned long startTime = 0;  // Время начала намотки
+int frequency = 0;                // Начальная частота ШИМ (частота шагов)
+int maxFrequency = 10000;         // Максимальная частота ШИМ для полной скорости
+int curFrequency = 0;             // Текущая частота ШИМ для полной скорости
+int accelDelay = 15;              // Задержка для плавного изменения скорости (мс)
+int decelDelay = 3;               // Задержка для плавного изменения скорости (мс)
+int accelStep = 100;              // Задержка для плавного изменения скорости (мс)
+bool isRunning = false;           // Флаг состояния работы моталки
+unsigned long startTime = 0;      // Время начала намотки
 unsigned long currentRunTime = 0; // Сохраненное время намотки
-unsigned long lastPressTime = 0;  // Время последнего нажатия на кнопку
-bool isPaused = false;        // Флаг паузы
-unsigned long longPressDuration = 3000; // Время для долгого нажатия (3 секунды)
-bool memoryCleared = false;   // Флаг очистки памяти
+bool isPaused = false;            // Флаг паузы
 
+bool memoryCleared = false; // Флаг очистки памяти
+
+float totalRevolutions = 0; // Общее количество оборотов
+
+unsigned long lastPressTime = 0;        // Время последнего нажатия на кнопку
+unsigned long longPressDuration = 1000; // Время для долгого нажатия
+
+// OLED reset pin (set to -1 if not used)
+#define OLED_RESET -1
 
 void clearMemory();
 void startWinding();
@@ -27,125 +42,317 @@ void accelerateMotor();
 void decelerateMotor();
 void saveToMemory();
 void blinkLED(int times);
+void updateDisplay();
 
-void setup() {
-  // Настройка пинов
-  pinMode(DIR_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);  // Кнопка с подтяжкой
-  pinMode(LED_PIN, OUTPUT);       // Встроенный светодиод
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+U8G2_FOR_ADAFRUIT_GFX u8g2; // Создаем объект для работы с кириллицей
 
-  digitalWrite(DIR_PIN, HIGH);        // Устанавливаем направление вращения
+// Глобальная структура JSON
+DynamicJsonDocument jsonData(1024);
 
-  digitalWrite(LED_PIN, HIGH);        // Устанавливаем направление вращения
+// Переменные для хранения предыдущих строк
+String lastDisplay[4] = {"", "", "", ""};
 
-  // Настройка ШИМ на STEP_PIN
-  ledcSetup(0, frequency, 8);  // Канал 0, частота 1 кГц, разрешение 8 бит
-  ledcAttachPin(STEP_PIN, 0);  // Привязываем канал 0 к STEP_PIN
+void setup()
+{
+    // Настройка пинов
+    pinMode(DIR_PIN, OUTPUT);
+    pinMode(BUTTON_PIN, INPUT_PULLUP); // Кнопка с подтяжкой
+    pinMode(LED_PIN, OUTPUT);          // Встроенный светодиод
+
+    digitalWrite(DIR_PIN, HIGH); // Устанавливаем направление вращения
+
+    digitalWrite(LED_PIN, HIGH); // Устанавливаем направление вращения
+
+    // Настройка ШИМ на STEP_PIN
+    ledcSetup(0, frequency, 8); // Канал 0, частота 1 кГц, разрешение 8 бит
+    ledcAttachPin(STEP_PIN, 0); // Привязываем канал 0 к STEP_PIN
+
+    // Initialize I2C communication on the correct pins
+    Wire.begin(6, 7); // SDA = GPIO6, SCL = GPIO7
+
+    // Initialize the OLED display
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    {
+        Serial.println(F("SSD1306 allocation failed"));
+        while (true)
+            ; // Halt if display fails to initialize
+    }
+
+    display.clearDisplay();
+    display.display();
+
+    u8g2.begin(display);
+    u8g2.setFont(u8g2_font_7x13_t_cyrillic); // Подключаем шрифт с кириллицей
+    u8g2.setCursor(0, 20);
+    u8g2.print(F("Старт..."));
+    display.display();
+
+    delay(500);
+    // Инициализация JSON-структуры
+    jsonData["time"]["label"] = "Время";
+    jsonData["time"]["value"] = "00:00";
+    jsonData["meters"]["label"] = "Метры";
+    jsonData["meters"]["value"] = 0;
+    jsonData["isrunning"]["label"] = "Вкл";
+    jsonData["isrunning"]["value"] = "нет";
+    jsonData["freq"]["label"] = "Част.";
+    jsonData["freq"]["value"] = "0";
+
+    // Начальный вывод на дисплей
+    updateDisplay();
 }
 
-void loop() {
-    if (digitalRead(BUTTON_PIN) == LOW  && !isRunning) {
+float calculateRevolutions(unsigned long lastUpdateTime, float curFrequency)
+{
+
+    unsigned long timeElapsed = millis() - lastUpdateTime;
+    if (timeElapsed > 0)
+    {
+        float revolutions = curFrequency * (timeElapsed / 1000.0);
+        totalRevolutions += revolutions / 800;
+    }
+    return totalRevolutions;
+}
+
+void updateDisplayStep()
+{
+    // Пример обновления JSON данных
+    static unsigned long lastTime = 0;
+    if (millis() - lastTime > 500)
+    {
+
+        // Обновляем значения в JSON-структуре
+        if (startTime)
+        {
+            jsonData["time"]["value"] = String("00:") + String(((millis() - startTime) / 1000) % 60);
+        }
+        else
+        {
+            jsonData["time"]["value"] = String("0");
+        }
+        jsonData["meters"]["value"] = calculateRevolutions(lastTime, curFrequency);
+
+        jsonData["isrunning"]["value"] = isRunning ? "да" : "нет";
+        jsonData["freq"]["value"] = curFrequency;
+
+        // Обновляем вывод на дисплей
+        updateDisplay();
+        lastTime = millis();
+    }
+}
+
+void onButtonPress()
+{
+    if (!isRunning)
+    {
         startWinding();
         blinkLED(3);
     }
-
-    if (digitalRead(BUTTON_PIN) == LOW  && isRunning) {
+    else
+    {
         stopWinding();
     }
+}
 
-  // Чтение состояния кнопки
-  /*if (digitalRead(BUTTON_PIN) == LOW) {
-    if (millis() - lastPressTime > longPressDuration) {
-      // Долгое нажатие - очищаем память
-      clearMemory();
-      memoryCleared = true;
-      lastPressTime = millis();  // Обновляем время последнего нажатия
+void onButtonLongPress()
+{
+    blinkLED(2);
+}
+
+
+void checkButtonStep(){
+int buttonState = digitalRead(BUTTON_PIN);
+
+    if (buttonState == LOW)
+    {
+
+        if (!lastPressTime)
+        {
+
+            lastPressTime = millis();
+        }
     }
-  } else {
-  
-   if (millis() - lastPressTime < longPressDuration && !isRunning && !isPaused && !memoryCleared) {
- 
-      // Первое нажатие - запуск моталки или возобновление
-      startWinding();
-      lastPressTime = millis();
-    } /*else if (isRunning) {
-      // Пауза при повторном нажатии
-      pauseWinding();
-      lastPressTime = millis();
-    } 
-  
-    memoryCleared = false;  // Сбрасываем флаг после нажатия
-  }
-*/
+    else
+    {
+        if (lastPressTime > 0)
+        { 
+            if (millis() - lastPressTime >= longPressDuration)
+            {
+                onButtonLongPress();
+              //  blinkLED(2);
+               // jsonData["isrunning"]["value"] = "2";
+            }
+            else
+            {
+                if (millis() - lastPressTime > 10)
+                {
+                 //   jsonData["isrunning"]["value"] = "1";
+                  //  blinkLED(1);
+                    onButtonPress();
+                }
+            }
+        }
 
-
-
-  // Автоматическая остановка по достижению сохраненного времени
- /* if (isRunning && !isPaused && millis() - startTime >= currentRunTime) {
-    stopWinding();
-  }*/
+        lastPressTime = 0;
+    }
 }
 
-void startWinding() {
- /*  if (currentRunTime == 0) {
-    // Если нет сохраненного значения, начинаем новый отсчет
-    startTime = millis();
+void loop()
+{
+
+    checkButtonStep();
+
+    updateDisplayStep();
+
+    // Чтение состояния кнопки
+    /*if (digitalRead(BUTTON_PIN) == LOW) {
+      if (millis() - lastPressTime > longPressDuration) {
+        // Долгое нажатие - очищаем память
+        clearMemory();
+        memoryCleared = true;
+        lastPressTime = millis();  // Обновляем время последнего нажатия
+      }
+    } else {
+
+     if (millis() - lastPressTime < longPressDuration && !isRunning && !isPaused && !memoryCleared) {
+
+        // Первое нажатие - запуск моталки или возобновление
+        startWinding();
+        lastPressTime = millis();
+      } /*else if (isRunning) {
+        // Пауза при повторном нажатии
+        pauseWinding();
+        lastPressTime = millis();
+      }
+
+      memoryCleared = false;  // Сбрасываем флаг после нажатия
+    }
+  */
+
+    // Автоматическая остановка по достижению сохраненного времени
+    /* if (isRunning && !isPaused && millis() - startTime >= currentRunTime) {
+       stopWinding();
+     }*/
+}
+
+void startWinding()
+{
+    if (currentRunTime == 0)
+    {
+        // Если нет сохраненного значения, начинаем новый отсчет
+        startTime = millis();
+        currentRunTime = 0;
+    }
+    else
+    {
+        // Восстанавливаем намотку по сохраненному времени
+        startTime = millis();
+    }
+    isRunning = true;
+    accelerateMotor();
+}
+
+void pauseWinding()
+{
+    isPaused = true;
+    currentRunTime = millis() - startTime; // Сохраняем текущее время намотки
+    decelerateMotor();
+    isRunning = false;
+    saveToMemory(); // Сохраняем в память
+}
+
+void stopWinding()
+{
+    decelerateMotor();
+    isRunning = false;
+    isPaused = false;
+}
+
+void saveToMemory()
+{
+    // Имитация сохранения данных (можно использовать EEPROM или другую память)
+    // Однократное мигание встроенным светодиодом
+    blinkLED(1);
+}
+
+void clearMemory()
+{
+    // Очищаем память о клубке
     currentRunTime = 0;
-  } else {
-    // Восстанавливаем намотку по сохраненному времени
-    startTime = millis();
-  }*/
-  isRunning = true;
-  accelerateMotor();
+    // Трёхкратное мигание встроенным светодиодом
+    blinkLED(3);
 }
 
-void pauseWinding() {
-  isPaused = true;
-  currentRunTime = millis() - startTime;  // Сохраняем текущее время намотки
-  decelerateMotor();
-  isRunning = false;
-  saveToMemory();  // Сохраняем в память
+void blinkLED(int times)
+{
+    for (int i = 0; i < times; i++)
+    {
+        digitalWrite(LED_PIN, LOW);  // Включаем светодиод
+        delay(200);                  // Задержка 200 мс
+        digitalWrite(LED_PIN, HIGH); // Выключаем светодиод
+        delay(200);                  // Задержка 200 мс
+    }
 }
 
-void stopWinding() {
-  decelerateMotor();
-  isRunning = false;
-  isPaused = false;
+void accelerateMotor()
+{
+    for (int freq = frequency; freq <= maxFrequency; freq += accelStep)
+    {
+        ledcWriteTone(0, freq); // Изменяем частоту ШИМ для плавного разгона
+        curFrequency = freq;
+        delay(accelDelay);
+        updateDisplayStep();
+        
+    }
 }
 
-void saveToMemory() {
-  // Имитация сохранения данных (можно использовать EEPROM или другую память)
-  // Однократное мигание встроенным светодиодом
-  blinkLED(1);
+void decelerateMotor()
+{
+    for (int freq = maxFrequency; freq >= frequency; freq -= accelStep)
+    {
+        ledcWriteTone(0, freq); // Изменяем частоту ШИМ для плавного торможения
+        curFrequency = freq;
+        delay(decelDelay);
+        updateDisplayStep();
+        
+    }
+    ledcWrite(0, 0); // Полная остановка ШИМ
 }
 
-void clearMemory() {
-  // Очищаем память о клубке
-  currentRunTime = 0;
-  // Трёхкратное мигание встроенным светодиодом
-  blinkLED(3);
-} 
+// Работа с экраном
 
-void blinkLED(int times) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(LED_PIN, LOW);  // Включаем светодиод
-    delay(200);                       // Задержка 200 мс
-    digitalWrite(LED_PIN, HIGH);   // Выключаем светодиод
-    delay(200);                       // Задержка 200 мс
-  }
-}
+void updateDisplay()
+{
+    // Получаем строки для отображения
+    String line1 = String(jsonData["time"]["label"].as<const char *>()) + ": " + String(jsonData["time"]["value"].as<const char *>());
+    String line2 = String(jsonData["meters"]["label"].as<const char *>()) + ": " + String(jsonData["meters"]["value"].as<int>());
+    String line3 = String(jsonData["isrunning"]["label"].as<const char *>()) + ": " + String(jsonData["isrunning"]["value"].as<const char *>());
+    String line4 = String(jsonData["freq"]["label"].as<const char *>()) + ": " + String(jsonData["freq"]["value"].as<int>());
 
-void accelerateMotor() {
-  for (int freq = frequency; freq <= maxFrequency; freq += accelStep) {
-    ledcWriteTone(0, freq);  // Изменяем частоту ШИМ для плавного разгона
-    delay(accelDelay);
-  }
-}
+    // Проверяем, изменились ли строки, чтобы обновить только при изменении
+    if (line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3])
+    {
+        display.clearDisplay(); // Очистка экрана
 
-void decelerateMotor() {
-  for (int freq = maxFrequency; freq >= frequency; freq -= accelStep) {
-    ledcWriteTone(0, freq);  // Изменяем частоту ШИМ для плавного торможения
-    delay(accelDelay);
-  }
-  ledcWrite(0, 0);  // Полная остановка ШИМ
+        u8g2.setCursor(0, 12);
+        u8g2.print(line1);
+
+        u8g2.setCursor(0, 24);
+        u8g2.print(line2);
+
+        u8g2.setCursor(0, 36);
+        u8g2.print(line3);
+
+        u8g2.setCursor(0, 48);
+        u8g2.print(line4);
+
+        display.display(); // Обновление дисплея
+
+        // Сохранение значений для сравнения в будущем
+        lastDisplay[0] = line1;
+        lastDisplay[1] = line2;
+        lastDisplay[2] = line3;
+        lastDisplay[3] = line4;
+    }
 }
