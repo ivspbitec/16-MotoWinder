@@ -86,6 +86,7 @@ void setup()
         ; // Ожидание, пока последовательный порт не будет готов (это может быть необходимо для некоторых плат)
     }
     blinkLED(5,50);
+    
      Serial.println(F("ESP Starting..."));
 
 
@@ -113,12 +114,15 @@ void setup()
     display.display();
 
     u8g2.begin(display);
-    u8g2.setFont(u8g2_font_7x13_t_cyrillic); // Подключаем шрифт с кириллицей
+    u8g2.setFont(u8g2_font_7x13_t_cyrillic);  
     u8g2.setCursor(0, 20);
-    u8g2.print(F("Старт..."));
+    u8g2.print(F("Запуск..."));
+ 
+ 
+
     display.display();
 
-    delay(500);
+    delay(1000);
     // Инициализация JSON-структуры
     jsonData["time"]["label"] = "Время";
     jsonData["time"]["value"] = "00:00";
@@ -128,6 +132,8 @@ void setup()
     jsonData["isrunning"]["value"] = "нет";
     jsonData["freq"]["label"] = "Част.";
     jsonData["freq"]["value"] = "0";
+    jsonData["maxMeters"]["label"] = "Память";
+    jsonData["maxMeters"]["value"] = "0";
 
     // Начальный вывод на дисплей
     updateDisplay();
@@ -395,39 +401,43 @@ void updateDisplay()
     String line4 = String(jsonData["freq"]["label"].as<const char *>()) + ": " + String(jsonData["freq"]["value"].as<int>()) + "     ";
     String line5 = String(jsonData["maxMeters"]["label"].as<const char *>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>()) + "     ";
 
-    // display.clearDisplay();
+     
 
-    if (line1 != lastDisplay[0])
+    if (
+        line1 != lastDisplay[0]
+        || line2 != lastDisplay[1]
+        || line3 != lastDisplay[2]
+        || line4 != lastDisplay[3]
+        || line5 != lastDisplay[4]
+    )
     {
-        u8g2.setCursor(0, 11);
+        int lineHeight=11;
+        display.clearDisplay();
+        u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
+
+
+        u8g2.setFont(u8g2_font_10x20_t_cyrillic);   
+        u8g2.setCursor(0, 15);
+        u8g2.print(String(String(jsonData["meters"]["value"].as<int>()) + " м."));
+
+        u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
+        u8g2.setCursor(0, 16+lineHeight*1);
         u8g2.print(line1);
-    }
 
-    if (line2 != lastDisplay[1])
-    {
-        u8g2.setCursor(0, 22);
-        u8g2.print(line2);
-    }
-
-    if (line3 != lastDisplay[2])
-    {
-        u8g2.setCursor(0, 33);
+        
+        u8g2.setCursor(0, 16+lineHeight*2);
         u8g2.print(line3);
-    }
-
-    if (line4 != lastDisplay[3])
-    {
-        u8g2.setCursor(0, 44);
+     
+        u8g2.setCursor(0, 16+lineHeight*3);
         u8g2.print(line4);
-    }
-
-    if (line5 != lastDisplay[4])
-    {
-        u8g2.setCursor(0, 55);
+     
+        u8g2.setCursor(0, 16+lineHeight*4);
         u8g2.print(line5);
+
+         display.display();
     }
 
-    display.display();
+   
 
     lastDisplay[0] = line1;
     lastDisplay[1] = line2;
