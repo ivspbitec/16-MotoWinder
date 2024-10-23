@@ -4,10 +4,12 @@
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
 #include <U8g2_for_Adafruit_GFX.h>
+#include <EEPROM.h>
 
 #define STEP_PIN 2        // Пин для STEP драйвера A4988
 #define DIR_PIN 3         // Пин для DIR драйвера A4988
-#define BUTTON_PIN 4      // Пин для кнопки
+#define BUTTON_PIN 4      // Пин для кнопки старт/стоп
+#define MEM_BUTTON_PIN 5  // Пин для кнопки памяти
 #define STEPS_PER_REV 800 // Количество шагов на один оборот двигателя
 #define LED_PIN 8         // Встроенный светодиод на ESP32
 #define SCREEN_WIDTH 128
@@ -27,6 +29,7 @@ bool isPaused = false;            // Флаг паузы
 bool memoryCleared = false; // Флаг очистки памяти
 
 float totalRevolutions = 0; // Общее количество оборотов
+float maxRevolutions = 0;   // Максимальное количество оборотов
 
 unsigned long lastPressTime = 0;        // Время последнего нажатия на кнопку
 unsigned long longPressDuration = 1000; // Время для долгого нажатия
@@ -41,8 +44,9 @@ void stopWinding();
 void accelerateMotor();
 void decelerateMotor();
 void saveToMemory();
-void blinkLED(int times);
+ 
 void updateDisplay();
+void loadMem();
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 U8G2_FOR_ADAFRUIT_GFX u8g2; // Создаем объект для работы с кириллицей
@@ -51,17 +55,40 @@ U8G2_FOR_ADAFRUIT_GFX u8g2; // Создаем объект для работы �
 DynamicJsonDocument jsonData(1024);
 
 // Переменные для хранения предыдущих строк
-String lastDisplay[4] = {"", "", "", ""};
+String lastDisplay[5] = {"", "", "", "", ""};
+
+
+void blinkLED(int times,uint32_t delayMs = 200)
+{
+    for (int i = 0; i < times; i++)
+    {
+        digitalWrite(LED_PIN, LOW);   
+        delay(delayMs);                   
+        digitalWrite(LED_PIN, HIGH);  
+        delay(delayMs);                  
+    }
+}
+
 
 void setup()
 {
+
+
     // Настройка пинов
     pinMode(DIR_PIN, OUTPUT);
-    pinMode(BUTTON_PIN, INPUT_PULLUP); // Кнопка с подтяжкой
-    pinMode(LED_PIN, OUTPUT);          // Встроенный светодиод
+    pinMode(BUTTON_PIN, INPUT_PULLUP);     // Кнопка с подтяжкой
+    pinMode(MEM_BUTTON_PIN, INPUT_PULLUP); // Кнопка mem с подтяжкой
+    pinMode(LED_PIN, OUTPUT);              // Встроенный светодиод
+ 
+    Serial.begin(115200); // Инициализация последовательного порта
+    while (!Serial)
+    {
+        ; // Ожидание, пока последовательный порт не будет готов (это может быть необходимо для некоторых плат)
+    }
+    blinkLED(5,50);
+
 
     digitalWrite(DIR_PIN, HIGH); // Устанавливаем направление вращения
-
     digitalWrite(LED_PIN, HIGH); // Устанавливаем направление вращения
 
     // Настройка ШИМ на STEP_PIN
@@ -70,6 +97,8 @@ void setup()
 
     // Initialize I2C communication on the correct pins
     Wire.begin(6, 7); // SDA = GPIO6, SCL = GPIO7
+    EEPROM.begin(512);
+    loadMem();
 
     // Initialize the OLED display
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -115,13 +144,26 @@ float calculateRevolutions(unsigned long lastUpdateTime, float curFrequency)
     return totalRevolutions;
 }
 
-void updateDisplayStep()
+void updateMetersStep()
 {
-    // Пример обновления JSON данных
     static unsigned long lastTime = 0;
     if (millis() - lastTime > 500)
     {
+        totalRevolutions = calculateRevolutions(lastTime, curFrequency);
+        if (maxRevolutions && totalRevolutions >= maxRevolutions)
+        {
+            stopWinding();
+        }
+        lastTime = millis();
+    }
+}
 
+void updateDisplayStep()
+{
+
+    static unsigned long lastTime = 0;
+    if (millis() - lastTime > 500)
+    {
         // Обновляем значения в JSON-структуре
         if (startTime)
         {
@@ -131,12 +173,12 @@ void updateDisplayStep()
         {
             jsonData["time"]["value"] = String("0");
         }
-        jsonData["meters"]["value"] = calculateRevolutions(lastTime, curFrequency);
 
+        jsonData["meters"]["value"] = totalRevolutions;
         jsonData["isrunning"]["value"] = isRunning ? "да" : "нет";
         jsonData["freq"]["value"] = curFrequency;
+        jsonData["maxMeters"]["value"] = maxRevolutions;
 
-        // Обновляем вывод на дисплей
         updateDisplay();
         lastTime = millis();
     }
@@ -160,36 +202,60 @@ void onButtonLongPress()
     blinkLED(2);
 }
 
+/** Стираем память*/
+void onMemButtonLongPress()
+{
+    maxRevolutions = 0;
+    totalRevolutions = 0;
+    EEPROM.write(0, maxRevolutions);
+    EEPROM.commit();
+    blinkLED(4);
+}
 
-void checkButtonStep(){
-int buttonState = digitalRead(BUTTON_PIN);
+/** Читаем из памяти */
+void loadMem()
+{
+    EEPROM.get(0, maxRevolutions);
+}
+
+void onMemButtonPress()
+{
+    maxRevolutions = totalRevolutions;
+    Serial.println("Сохраняем значение...");
+    EEPROM.put(0, maxRevolutions);
+
+    Serial.print("Текущее значение в EEPROM: ");
+    Serial.println(EEPROM.read(0));
+}
+
+void checkButtonStep(uint8_t pin, void (*shortPressFunc)(), void (*longPressFunc)())
+{
+    int buttonState = digitalRead(pin);
 
     if (buttonState == LOW)
     {
-
         if (!lastPressTime)
         {
-
             lastPressTime = millis();
         }
     }
     else
     {
         if (lastPressTime > 0)
-        { 
+        {
             if (millis() - lastPressTime >= longPressDuration)
             {
-                onButtonLongPress();
-              //  blinkLED(2);
-               // jsonData["isrunning"]["value"] = "2";
+                longPressFunc();
+                //  blinkLED(2);
+                // jsonData["isrunning"]["value"] = "2";
             }
             else
             {
-                if (millis() - lastPressTime > 10)
+                if (millis() - lastPressTime > 6)
                 {
-                 //   jsonData["isrunning"]["value"] = "1";
-                  //  blinkLED(1);
-                    onButtonPress();
+                    //   jsonData["isrunning"]["value"] = "1";
+                    //  blinkLED(1);
+                    shortPressFunc();
                 }
             }
         }
@@ -198,12 +264,19 @@ int buttonState = digitalRead(BUTTON_PIN);
     }
 }
 
+void checkButtonsStep()
+{
+    checkButtonStep(BUTTON_PIN, onButtonPress, onButtonLongPress);
+    checkButtonStep(MEM_BUTTON_PIN, onMemButtonPress, onMemButtonLongPress);
+}
+
 void loop()
 {
 
-    checkButtonStep();
+    checkButtonsStep();
 
     updateDisplayStep();
+    updateMetersStep();
 
     // Чтение состояния кнопки
     /*if (digitalRead(BUTTON_PIN) == LOW) {
@@ -284,16 +357,7 @@ void clearMemory()
     blinkLED(3);
 }
 
-void blinkLED(int times)
-{
-    for (int i = 0; i < times; i++)
-    {
-        digitalWrite(LED_PIN, LOW);  // Включаем светодиод
-        delay(200);                  // Задержка 200 мс
-        digitalWrite(LED_PIN, HIGH); // Выключаем светодиод
-        delay(200);                  // Задержка 200 мс
-    }
-}
+
 
 void accelerateMotor()
 {
@@ -303,7 +367,7 @@ void accelerateMotor()
         curFrequency = freq;
         delay(accelDelay);
         updateDisplayStep();
-        
+        updateMetersStep();
     }
 }
 
@@ -315,7 +379,7 @@ void decelerateMotor()
         curFrequency = freq;
         delay(decelDelay);
         updateDisplayStep();
-        
+        updateMetersStep();
     }
     ledcWrite(0, 0); // Полная остановка ШИМ
 }
@@ -324,35 +388,49 @@ void decelerateMotor()
 
 void updateDisplay()
 {
-    // Получаем строки для отображения
-    String line1 = String(jsonData["time"]["label"].as<const char *>()) + ": " + String(jsonData["time"]["value"].as<const char *>());
-    String line2 = String(jsonData["meters"]["label"].as<const char *>()) + ": " + String(jsonData["meters"]["value"].as<int>());
-    String line3 = String(jsonData["isrunning"]["label"].as<const char *>()) + ": " + String(jsonData["isrunning"]["value"].as<const char *>());
-    String line4 = String(jsonData["freq"]["label"].as<const char *>()) + ": " + String(jsonData["freq"]["value"].as<int>());
+    String line1 = String(jsonData["time"]["label"].as<const char *>()) + ": " + String(jsonData["time"]["value"].as<const char *>()) + "     ";
+    String line2 = String(jsonData["meters"]["label"].as<const char *>()) + ": " + String(jsonData["meters"]["value"].as<int>()) + "     ";
+    String line3 = String(jsonData["isrunning"]["label"].as<const char *>()) + ": " + String(jsonData["isrunning"]["value"].as<const char *>()) + "     ";
+    String line4 = String(jsonData["freq"]["label"].as<const char *>()) + ": " + String(jsonData["freq"]["value"].as<int>()) + "     ";
+    String line5 = String(jsonData["maxMeters"]["label"].as<const char *>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>()) + "     ";
 
-    // Проверяем, изменились ли строки, чтобы обновить только при изменении
-    if (line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3])
+    // display.clearDisplay();
+
+    if (line1 != lastDisplay[0])
     {
-        display.clearDisplay(); // Очистка экрана
-
-        u8g2.setCursor(0, 12);
+        u8g2.setCursor(0, 11);
         u8g2.print(line1);
-
-        u8g2.setCursor(0, 24);
-        u8g2.print(line2);
-
-        u8g2.setCursor(0, 36);
-        u8g2.print(line3);
-
-        u8g2.setCursor(0, 48);
-        u8g2.print(line4);
-
-        display.display(); // Обновление дисплея
-
-        // Сохранение значений для сравнения в будущем
-        lastDisplay[0] = line1;
-        lastDisplay[1] = line2;
-        lastDisplay[2] = line3;
-        lastDisplay[3] = line4;
     }
+
+    if (line2 != lastDisplay[1])
+    {
+        u8g2.setCursor(0, 22);
+        u8g2.print(line2);
+    }
+
+    if (line3 != lastDisplay[2])
+    {
+        u8g2.setCursor(0, 33);
+        u8g2.print(line3);
+    }
+
+    if (line4 != lastDisplay[3])
+    {
+        u8g2.setCursor(0, 44);
+        u8g2.print(line4);
+    }
+
+    if (line5 != lastDisplay[4])
+    {
+        u8g2.setCursor(0, 55);
+        u8g2.print(line5);
+    }
+
+    display.display();
+
+    lastDisplay[0] = line1;
+    lastDisplay[1] = line2;
+    lastDisplay[2] = line3;
+    lastDisplay[3] = line4;
+    lastDisplay[4] = line5;
 }
