@@ -114,10 +114,20 @@ void setup()
     display.display();
 
     u8g2.begin(display);
+<<<<<<< HEAD
     u8g2.setFont(u8g2_font_7x13_t_cyrillic);  
     u8g2.setCursor(0, 20);
-    u8g2.print(F("Запуск..."));
+    u8g2.print(F("Запуск...")); 
  
+=======
+    u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
+    u8g2.setCursor(0, 20);
+    u8g2.print(F("Старт..."));
+    u8g2.setFont(u8g2_font_10x20_t_cyrillic);   
+    u8g2.setCursor(0, 50);
+    u8g2.print(F("Старт..."));
+
+>>>>>>> 810a5b1f52efa3ccc6b93f05f9dd588f0ac2c4ac
  
 
     display.display();
@@ -415,6 +425,7 @@ void updateDisplay()
         display.clearDisplay();
         u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
 
+<<<<<<< HEAD
 
         u8g2.setFont(u8g2_font_10x20_t_cyrillic);   
         u8g2.setCursor(0, 15);
@@ -424,6 +435,18 @@ void updateDisplay()
         u8g2.setCursor(0, 16+lineHeight*1);
         u8g2.print(line1);
 
+=======
+
+ 
+        u8g2.setFont(u8g2_font_10x20_t_cyrillic);   
+        u8g2.setCursor(0, 15);
+        u8g2.print(line2);
+
+        u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
+        u8g2.setCursor(0, 16+lineHeight*1);
+        u8g2.print(line1);
+
+>>>>>>> 810a5b1f52efa3ccc6b93f05f9dd588f0ac2c4ac
         
         u8g2.setCursor(0, 16+lineHeight*2);
         u8g2.print(line3);
