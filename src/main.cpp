@@ -263,12 +263,12 @@ void IRAM_ATTR requestLongTask(void (*func)()) {
 
 void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime,  unsigned long &lpTime, void (*shortPressFunc)(), void (*longPressFunc)())
 {
-  int buttonState = digitalRead(pin);
+  
     unsigned long currentTime = millis();
     if (currentTime - dbTime > debounceDelay  )
     {
         dbTime = currentTime;
-      
+        int buttonState = digitalRead(pin);    
 
         Serial.printf("iPin=%d iState=%d\n", pin, buttonState);
 
