@@ -8,7 +8,7 @@
 
 #define STEP_PIN 2        // Пин для STEP драйвера A4988
 #define DIR_PIN 3         // Пин для DIR драйвера A4988
-#define BUTTON_PIN 4       // Пин для кнопки старт/стоп
+#define BUTTON_PIN 4      // Пин для кнопки старт/стоп
 #define MEM_BUTTON_PIN 5  // Пин для кнопки памяти
 #define STEPS_PER_REV 800 // Количество шагов на один оборот двигателя
 #define LED_PIN 8         // Встроенный светодиод на ESP32
@@ -29,10 +29,11 @@ bool isPaused = false;            // Флаг паузы
 bool memoryCleared = false; // Флаг очистки памяти
 
 float totalRevolutions = 0; // Общее количество оборотов
-float maxRevolutions = 0;   // Максимальное количество оборотов 
+float maxRevolutions = 0;   // Максимальное количество оборотов
 
- 
-unsigned long longPressDuration = 1000; // Время для долгого нажатия
+unsigned long longPressDuration = 1500; // Время для долгого нажатия
+const unsigned long debounceDelay = 50; // Минимальная задержка для антидребезга в миллисекундах
+
 
 // OLED reset pin (set to -1 if not used)
 #define OLED_RESET -1
@@ -44,7 +45,7 @@ void stopWinding();
 void accelerateMotor();
 void decelerateMotor();
 void saveToMemory();
- 
+
 void updateDisplay();
 void loadMem();
 
@@ -60,38 +61,34 @@ DynamicJsonDocument jsonData(512);
 // Переменные для хранения предыдущих строк
 String lastDisplay[5] = {"", "", "", "", ""};
 
-
-void blinkLED(int times,uint32_t delayMs = 200)
+void blinkLED(int times, uint32_t delayMs = 200)
 {
     for (int i = 0; i < times; i++)
     {
-        digitalWrite(LED_PIN, LOW);   
-        delay(delayMs);                   
-        digitalWrite(LED_PIN, HIGH);  
-        delay(delayMs);                  
+        digitalWrite(LED_PIN, LOW);
+        delay(delayMs);
+        digitalWrite(LED_PIN, HIGH);
+        delay(delayMs);
     }
 }
 
-
 void setup()
 {
-
 
     // Настройка пинов
     pinMode(DIR_PIN, OUTPUT);
     pinMode(BUTTON_PIN, INPUT_PULLUP);     // Кнопка с подтяжкой
     pinMode(MEM_BUTTON_PIN, INPUT_PULLUP); // Кнопка mem с подтяжкой
     pinMode(LED_PIN, OUTPUT);              // Встроенный светодиод
- 
+
     Serial.begin(115200); // Инициализация последовательного порта
     while (!Serial)
     {
         ; // Ожидание, пока последовательный порт не будет готов (это может быть необходимо для некоторых плат)
     }
-    blinkLED(5,50);
-    
-     Serial.println(F("ESP Starting..."));
+    blinkLED(5, 50);
 
+    Serial.println(F("ESP Starting..."));
 
     digitalWrite(DIR_PIN, HIGH); // Устанавливаем направление вращения
     digitalWrite(LED_PIN, HIGH); // Устанавливаем направление вращения
@@ -117,11 +114,9 @@ void setup()
     display.display();
 
     u8g2.begin(display);
-    u8g2.setFont(u8g2_font_7x13_t_cyrillic);  
+    u8g2.setFont(u8g2_font_7x13_t_cyrillic);
     u8g2.setCursor(0, 20);
-    u8g2.print(F("Запуск...")); 
- 
- 
+    u8g2.print(F("Запуск..."));
 
     display.display();
 
@@ -140,8 +135,8 @@ void setup()
 
     // Начальный вывод на дисплей
     updateDisplay();
-    
-    //Кнопки
+
+    // Кнопки
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
     attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
 }
@@ -155,7 +150,6 @@ void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency)
         float revolutions = curFrequency * (timeElapsed / 1000.0);
         totalRevolutions += revolutions / 800;
     }
-   
 }
 
 /* Стстаус остановки по памяти 0 - небыло остановки 1 - была остановка */
@@ -167,12 +161,12 @@ void updateMetersStep()
     if (millis() - lastTime > 500)
     {
         calculateRevolutions(lastTime, curFrequency);
-        if (maxRevolutions>0 && totalRevolutions >= maxRevolutions && !isStopedOnMem )
-        {             
-            isStopedOnMem=true;
+        if (maxRevolutions > 0 && totalRevolutions >= maxRevolutions && !isStopedOnMem)
+        {
+            isStopedOnMem = true;
             stopWinding();
-            totalRevolutions=0;
-            isStopedOnMem=false;
+            totalRevolutions = 0;
+            isStopedOnMem = false;
         }
         lastTime = millis();
     }
@@ -235,10 +229,11 @@ void onMemButtonLongPress()
 /** Читаем из памяти */
 void loadMem()
 {
-     EEPROM.get(0, maxRevolutions);
-      if (isnan(maxRevolutions)){
-        maxRevolutions=0.0;
-      }
+    EEPROM.get(0, maxRevolutions);
+    if (isnan(maxRevolutions))
+    {
+        maxRevolutions = 0.0;
+    }
 }
 
 void onMemButtonPress()
@@ -248,94 +243,89 @@ void onMemButtonPress()
     Serial.println(maxRevolutions);
     EEPROM.put(0, maxRevolutions);
     EEPROM.commit();
-    totalRevolutions=0;
+    totalRevolutions = 0;
 
     Serial.print("Текущее значение в EEPROM: ");
     float test;
-    EEPROM.get(0,test);
+    EEPROM.get(0, test);
     Serial.println(test);
 }
+ 
 
+ volatile bool startLongTask = false; // Флаг для запуска долгой задачи
+void (*longTaskFunc)() = nullptr; // Указатель на долгую функцию
 
+// Универсальная функция для установки флага и указателя на долгую функцию
+void IRAM_ATTR requestLongTask(void (*func)()) {
+    longTaskFunc = func; // Сохраняем указатель на функцию
+    startLongTask = true; // Устанавливаем флаг
+}
 
-
-void checkButtonStep(uint8_t pin, unsigned long &lastPressTime, void (*shortPressFunc)(), void (*longPressFunc)())
+void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime,  unsigned long &lpTime, void (*shortPressFunc)(), void (*longPressFunc)())
 {
+  int buttonState = digitalRead(pin);
+    unsigned long currentTime = millis();
+    if (currentTime - dbTime > debounceDelay  )
+    {
+        dbTime = currentTime;
+      
 
-   // delay(10);
-             
-   
-    int buttonState = digitalRead(pin);
+        Serial.printf("iPin=%d iState=%d\n", pin, buttonState);
 
-         Serial.print(" pin=");
-         Serial.print(pin);
-         Serial.print(" state=");
-         Serial.print(buttonState);
-         Serial.print(" lt=");
-         Serial.println(lastPressTime);
-
-
-    if (buttonState == LOW){
-         if (lastPressTime==0){
-            lastPressTime = millis();
+        if (buttonState == LOW && lpTime == 0)
+        {
+            lpTime = millis();
         }
-    }
-     
-     if (buttonState == HIGH ){
-          
-     if (lastPressTime>0 && millis() -lastPressTime>5){
 
-        if (millis() - lastPressTime >= longPressDuration)
+        if (buttonState == HIGH && lpTime > 0)
+        {
+            unsigned long pressDuration = millis() - lpTime;
+
+            if (pressDuration >= longPressDuration)
             {
-                 lastPressTime = 0;
-                  Serial.print(" pin=");
-         Serial.print(pin);
-                //longPressFunc();
-                //  blinkLED(pin,20);
-                // jsonData["isrunning"]["value"] = "2";
-                Serial.println("longpress");
+                Serial.printf("longpress\n");
+                 
+                requestLongTask(longPressFunc);
             }
             else
             {
-                 lastPressTime = 0;
-                  Serial.print(" pin=");
-         Serial.print(pin);
-                 
-                    //   jsonData["isrunning"]["value"] = "1";
-                    //  blinkLED(1);
-                         Serial.println("press");
-                         
-                     //  blinkLED(pin,50);
-                //    shortPressFunc();
-                   // Serial.println("stop func");
-              
+                Serial.printf("press\n");
+                //requestLongTask(shortPressFunc);
+                
             }
+            lpTime = 0; // Сброс времени нажатия
         }
-           
-
-     }
+    }
 }
 
+unsigned long lastPressTimeButton = 0;
+unsigned long lastPressDbTimeButton = 0;
 
-  unsigned long lastPressTimeButton = 0;
-        unsigned long lastPressTimeMem = 0;
+void IRAM_ATTR handleInterruptPinStart()
+{
+    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress);     
+}
+
+unsigned long lastPressTimeMem = 0;
+unsigned long lastPressDbTimeMem = 0;
+void IRAM_ATTR handleInterruptPinMem()
+{
+    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);     
  
-void IRAM_ATTR handleInterruptPinStart() {
-   checkButtonStep(BUTTON_PIN, lastPressTimeButton, onButtonPress, onButtonLongPress);
 }
 
-void IRAM_ATTR handleInterruptPinMem() {
-     
-    checkButtonStep(MEM_BUTTON_PIN, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);
-   
+void longFunctionStep(){
+  if (startLongTask && longTaskFunc != nullptr) { // Проверяем флаг и указатель
+        startLongTask = false; // Сбрасываем флаг
+        longTaskFunc(); // Вызываем долгую функцию
+    }
 }
-
 
 void loop()
-{ 
-    
+{
     updateDisplayStep();
-    updateMetersStep();
+    updateMetersStep(); 
+    longFunctionStep();
 }
 
 void startWinding()
@@ -373,16 +363,14 @@ void stopWinding()
 
 void saveToMemory()
 {
-     blinkLED(1);
+    blinkLED(1);
 }
 
 void clearMemory()
 {
-     currentRunTime = 0;
-     blinkLED(3);
+    currentRunTime = 0;
+    blinkLED(3);
 }
-
-
 
 void accelerateMotor()
 {
@@ -419,42 +407,32 @@ void updateDisplay()
     String line4 = String(jsonData["freq"]["label"].as<const char *>()) + ": " + String(jsonData["freq"]["value"].as<int>()) + "     ";
     String line5 = String(jsonData["maxMeters"]["label"].as<const char *>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>()) + "     ";
 
-      
-
     if (
-        line1 != lastDisplay[0]
-        || line2 != lastDisplay[1]
-        || line3 != lastDisplay[2]
-        || line4 != lastDisplay[3]
-        || line5 != lastDisplay[4]
-    )
+        line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3] || line5 != lastDisplay[4])
     {
-        int lineHeight=11;
+        int lineHeight = 11;
         display.clearDisplay();
-        u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
+        u8g2.setFont(u8g2_font_6x12_t_cyrillic);
 
-
-        u8g2.setFont(u8g2_font_10x20_t_cyrillic);   
+        u8g2.setFont(u8g2_font_10x20_t_cyrillic);
         u8g2.setCursor(0, 15);
         u8g2.print(String(String(jsonData["meters"]["value"].as<int>()) + " м."));
 
-        u8g2.setFont(u8g2_font_6x12_t_cyrillic);  
-        u8g2.setCursor(0, 16+lineHeight*1);
+        u8g2.setFont(u8g2_font_6x12_t_cyrillic);
+        u8g2.setCursor(0, 16 + lineHeight * 1);
         u8g2.print(line1);
 
-        
-        u8g2.setCursor(0, 16+lineHeight*2);
+        u8g2.setCursor(0, 16 + lineHeight * 2);
         u8g2.print(line3);
-     
-        u8g2.setCursor(0, 16+lineHeight*3);
+
+        u8g2.setCursor(0, 16 + lineHeight * 3);
         u8g2.print(line4);
-     
-        u8g2.setCursor(0, 16+lineHeight*4);
+
+        u8g2.setCursor(0, 16 + lineHeight * 4);
         u8g2.print(line5);
 
-         display.display();
+        display.display();
     }
- 
 
     lastDisplay[0] = line1;
     lastDisplay[1] = line2;
