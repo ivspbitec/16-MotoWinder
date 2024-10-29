@@ -32,8 +32,7 @@ float totalRevolutions = 0; // Общее количество оборотов
 float maxRevolutions = 0;   // Максимальное количество оборотов
 
 unsigned long longPressDuration = 1500; // Время для долгого нажатия
-const unsigned long debounceDelay = 50; // Минимальная задержка для антидребезга в миллисекундах
-
+const unsigned long debounceDelay = 0; // Минимальная задержка для антидребезга в миллисекундах
 
 // OLED reset pin (set to -1 if not used)
 #define OLED_RESET -1
@@ -137,8 +136,8 @@ void setup()
     updateDisplay();
 
     // Кнопки
-    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
+    //attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
+    //attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
 }
 
 void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency)
@@ -161,11 +160,11 @@ void updateMetersStep()
     if (millis() - lastTime > 500)
     {
         calculateRevolutions(lastTime, curFrequency);
-        if (maxRevolutions > 0 && totalRevolutions >= maxRevolutions && !isStopedOnMem)
+        if (maxRevolutions > 0 && totalRevolutions >= maxRevolutions-8 && !isStopedOnMem)
         {
             isStopedOnMem = true;
             stopWinding();
-            totalRevolutions = 0;
+            totalRevolutions = -8;
             isStopedOnMem = false;
         }
         lastTime = millis();
@@ -176,7 +175,7 @@ void updateDisplayStep()
 {
 
     static unsigned long lastTime = 0;
-    if (millis() - lastTime > 250)
+    if (millis() - lastTime > 150)
     {
         // Обновляем значения в JSON-структуре
         if (startTime)
@@ -202,8 +201,7 @@ void onButtonPress()
 {
     if (!isRunning)
     {
-        startWinding();
-        blinkLED(3);
+        startWinding();     
     }
     else
     {
@@ -213,7 +211,7 @@ void onButtonPress()
 
 void onButtonLongPress()
 {
-    blinkLED(2);
+    
 }
 
 /** Стираем память*/
@@ -250,27 +248,27 @@ void onMemButtonPress()
     EEPROM.get(0, test);
     Serial.println(test);
 }
- 
 
- volatile bool startLongTask = false; // Флаг для запуска долгой задачи
-void (*longTaskFunc)() = nullptr; // Указатель на долгую функцию
+volatile bool startLongTask = false; // Флаг для запуска долгой задачи
+void (*longTaskFunc)() = nullptr;    // Указатель на долгую функцию
 
 // Универсальная функция для установки флага и указателя на долгую функцию
-void IRAM_ATTR requestLongTask(void (*func)()) {
-    longTaskFunc = func; // Сохраняем указатель на функцию
+void IRAM_ATTR requestLongTask(void (*func)())
+{
+    longTaskFunc = func;  // Сохраняем указатель на функцию
     startLongTask = true; // Устанавливаем флаг
 }
 
-void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime,  unsigned long &lpTime, void (*shortPressFunc)(), void (*longPressFunc)())
+void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime, unsigned long &lpTime, void (*shortPressFunc)(), void (*longPressFunc)())
 {
-  
+
     unsigned long currentTime = millis();
-    if (currentTime - dbTime > debounceDelay  )
+    if (currentTime - dbTime > debounceDelay)
     {
         dbTime = currentTime;
-        int buttonState = digitalRead(pin);    
+        int buttonState = digitalRead(pin);
 
-        Serial.printf("iPin=%d iState=%d\n", pin, buttonState);
+       // Serial.printf("iPin=%d iState=%d\n", pin, buttonState);
 
         if (buttonState == LOW && lpTime == 0)
         {
@@ -284,14 +282,15 @@ void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime,  unsigned lon
             if (pressDuration >= longPressDuration)
             {
                 Serial.printf("longpress\n");
-                 
-                requestLongTask(longPressFunc);
+
+                // requestLongTask(longPressFunc);
+                longPressFunc();
             }
             else
             {
                 Serial.printf("press\n");
-                //requestLongTask(shortPressFunc);
-                
+                // requestLongTask(shortPressFunc)
+                shortPressFunc();
             }
             lpTime = 0; // Сброс времени нажатия
         }
@@ -300,32 +299,36 @@ void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long &dbTime,  unsigned lon
 
 unsigned long lastPressTimeButton = 0;
 unsigned long lastPressDbTimeButton = 0;
-
+/*
 void IRAM_ATTR handleInterruptPinStart()
 {
-    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress);     
-}
+    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress);
+}*/
 
 unsigned long lastPressTimeMem = 0;
 unsigned long lastPressDbTimeMem = 0;
+/*
 void IRAM_ATTR handleInterruptPinMem()
 {
-    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);     
- 
-}
+    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);
+}*/
 
-void longFunctionStep(){
-  if (startLongTask && longTaskFunc != nullptr) { // Проверяем флаг и указатель
-        startLongTask = false; // Сбрасываем флаг
-        longTaskFunc(); // Вызываем долгую функцию
-    }
-}
 
-void loop()
+void checkButtonsStep()
 {
-    updateDisplayStep();
-    updateMetersStep(); 
-    longFunctionStep();
+    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress);
+    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);
+}
+
+
+
+void longFunctionStep()
+{
+    if (startLongTask && longTaskFunc != nullptr)
+    {                          // Проверяем флаг и указатель
+        startLongTask = false; // Сбрасываем флаг
+        longTaskFunc();        // Вызываем долгую функцию
+    }
 }
 
 void startWinding()
@@ -372,29 +375,44 @@ void clearMemory()
     blinkLED(3);
 }
 
-void accelerateMotor()
+bool accelerateMotorStepOn = false;
+int accelerateMotorStep_freq = 0;
+int accelerateMotorStep_step = accelStep;
+int accelerateMotorStep_max = maxFrequency;
+void accelerateMotorStep()
 {
-    for (int freq = frequency; freq <= maxFrequency; freq += accelStep)
+    if (accelerateMotorStepOn)
     {
-        ledcWriteTone(0, freq); // Изменяем частоту ШИМ для плавного разгона
-        curFrequency = freq;
+        if ((accelerateMotorStep_step > 0 && accelerateMotorStep_freq >= accelerateMotorStep_max) || (accelerateMotorStep_step < 0 && accelerateMotorStep_freq <= accelerateMotorStep_max))
+        {
+            accelerateMotorStepOn = false;            
+        }
+        //Serial.printf("Motor freq: %d\n",accelerateMotorStep_freq);
+        ledcWriteTone(0, accelerateMotorStep_freq); // Изменяем частоту ШИМ для плавного разгона
+        curFrequency = accelerateMotorStep_freq;
         delay(accelDelay);
         updateDisplayStep();
         updateMetersStep();
+
+        accelerateMotorStep_freq += accelerateMotorStep_step;
     }
+}
+
+void accelerateMotor()
+{
+    accelerateMotorStep_freq = curFrequency;
+    accelerateMotorStep_step = accelStep;
+    accelerateMotorStep_max = maxFrequency;
+    accelerateMotorStepOn = true;
 }
 
 void decelerateMotor()
 {
-    for (int freq = maxFrequency; freq >= frequency; freq -= accelStep)
-    {
-        ledcWriteTone(0, freq); // Изменяем частоту ШИМ для плавного торможения
-        curFrequency = freq;
-        delay(decelDelay);
-        updateDisplayStep();
-        updateMetersStep();
-    }
-    ledcWrite(0, 0); // Полная остановка ШИМ
+    accelerateMotorStep_freq = curFrequency;
+    accelerateMotorStep_step = -accelStep;
+    accelerateMotorStep_max = 0;
+    accelerateMotorStepOn = true;
+  
 }
 
 // Работа с экраном
@@ -439,4 +457,14 @@ void updateDisplay()
     lastDisplay[2] = line3;
     lastDisplay[3] = line4;
     lastDisplay[4] = line5;
+}
+
+void loop()
+{
+    updateDisplayStep();
+    updateMetersStep();
+    //  longFunctionStep();
+    checkButtonsStep();
+
+    accelerateMotorStep();
 }
