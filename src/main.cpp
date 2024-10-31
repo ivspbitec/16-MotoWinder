@@ -213,7 +213,9 @@ void updateDisplayStep() {
         else {
             jsonData["time"]["value"] = String("0");
         }*/
-        jsonData["time"]["value"] = maxRevolutions > 0 ? String(round((float)totalRevolutions / maxRevolutions * 100)) + "%" : "-";
+        float percent=round((float)totalRevolutions / (float)maxRevolutions * 100);
+        
+        jsonData["time"]["value"] = maxRevolutions > 0 ? percent : 0;
 
 
         jsonData["meters"]["value"] = totalRevolutions;
@@ -265,10 +267,8 @@ void onMemButtonPress() {
     EEPROM.commit();
     totalRevolutions = 0;
 
-    Serial.print("Текущее значение в EEPROM: ");
-    float test;
-    EEPROM.get(0, test);
-    Serial.println(test);
+    delay(200);
+ 
 }
 
 volatile bool startLongTask = false; // Флаг для запуска долгой задачи
@@ -413,13 +413,17 @@ void decelerateMotor() {
 // Работа с экраном
 
 void displayProgressBar(int percentage) {
-    display.clearDisplay(); // Очищаем экран
-
+   // display.clearDisplay(); // Очищаем экран
+      int BAR_X = 0;
+      int BAR_Y = 18;
+      int PROGRESS_BAR_WIDTH = 128;
+      int PROGRESS_BAR_HEIGHT = 10;
+    
     // Отображаем процент прогресса
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(BAR_X + PROGRESS_BAR_WIDTH + 5, BAR_Y - 3);
-    display.print(String(percentage) + "%");
+   // display.setTextSize(1);
+   // display.setTextColor(SSD1306_WHITE);
+    //display.setCursor(BAR_X + PROGRESS_BAR_WIDTH + 5, BAR_Y - 3);
+  //  display.print(String(percentage) + "%");
 
     // Рассчитываем ширину заполненной части бара
     int filledWidth = map(percentage, 0, 100, 0, PROGRESS_BAR_WIDTH);
@@ -431,18 +435,19 @@ void displayProgressBar(int percentage) {
     display.fillRect(BAR_X, BAR_Y, filledWidth, PROGRESS_BAR_HEIGHT, SSD1306_WHITE);
 
     // Обновляем дисплей
-    display.display();
+    //display.display();
 }
 
 void updateDisplay() {
-    String line1 = String(jsonData["time"]["label"].as<const char*>()) + ": " + String(jsonData["time"]["value"].as<const char*>()) ;
+    //String line1 = String(jsonData["time"]["label"].as<const char*>()) + ": " + String(jsonData["time"]["value"].as<const char*>()) ;
+    String line1 = "";
     String line2 = String(jsonData["meters"]["label"].as<const char*>()) + ": " + String(jsonData["meters"]["value"].as<int>()) ;
     String line3 = String(jsonData["isrunning"]["label"].as<const char*>()) + ": " + String(jsonData["isrunning"]["value"].as<const char*>()) ;
     String line4 = String(jsonData["freq"]["label"].as<const char*>()) + ": " + String(jsonData["freq"]["value"].as<int>());
     String line5 = String(jsonData["maxMeters"]["label"].as<const char*>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>()) ;
 
-    if (
-        line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3] || line5 != lastDisplay[4]) {
+    //if ( line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3] || line5 != lastDisplay[4]) {
+
         int lineHeight = 11;
         display.clearDisplay();
         //u8g2.setFont(u8g2_font_6x12_t_cyrillic);
@@ -452,8 +457,9 @@ void updateDisplay() {
         u8g2.print(String(String(jsonData["meters"]["value"].as<int>()) + " м."));
 
         u8g2.setFont(u8g2_font_6x12_t_cyrillic);
-        u8g2.setCursor(0, 16 + lineHeight * 1);
-        u8g2.print(line1);
+        //u8g2.setCursor(0, 16 + lineHeight * 1);
+       // u8g2.print(line1);
+       displayProgressBar(jsonData["time"]["value"]);
 
         u8g2.setCursor(0, 16 + lineHeight * 2);
         u8g2.print(line3);
@@ -465,7 +471,7 @@ void updateDisplay() {
         u8g2.print(line5);
 
         display.display();
-    }
+   // }
 
     lastDisplay[0] = line1;
     lastDisplay[1] = line2;
