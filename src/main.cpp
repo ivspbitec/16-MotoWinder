@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <U8g2_for_Adafruit_GFX.h>
 #include <EEPROM.h>
+#include "Buzzer.h"
 
 #define STEP_PIN 2        // Пин для STEP драйвера A4988
 #define DIR_PIN 3         // Пин для DIR драйвера A4988
@@ -37,6 +38,8 @@ const unsigned long debounceDelay = 0;  // Минимальная задержк
 
 // OLED reset pin (set to -1 if not used)
 #define OLED_RESET -1
+
+
 
 void clearMemory();
 void startWinding();
@@ -160,7 +163,12 @@ void setup() {
     // Кнопки
     // attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
     // attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
+
+    pinMode(buzzerPin, OUTPUT);
 }
+
+ 
+
 
 void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency) {
 
@@ -186,6 +194,9 @@ void updateMetersStep() {
         if (maxRevolutions > 0 && totalRevolutions+stopDistance >= maxRevolutions && !isStopedOnMem) {
             isStopedOnMem = true;
             stopWinding();
+          
+            execAutoStopWindingTone=true;
+          
            // totalRevolutions = 0; 
            // isStopedOnMem = false;
 
@@ -229,6 +240,7 @@ void updateDisplayStep() {
 }
 
 void onButtonPress() {
+    execKeyTone=true;
     if (!isRunning) {
         startWinding();
     }
@@ -249,6 +261,7 @@ void onMemButtonLongPress() {
     EEPROM.put(0, maxRevolutions);
     EEPROM.commit();
     blinkLED(2);
+    execKeyTone=true;
 }
 
 /** Читаем из памяти */
@@ -367,6 +380,7 @@ void stopWinding() {
 void clearMemory() {
     currentRunTime = 0;
     blinkLED(3);
+    execMemoryClearTone=true;
 }
 
 bool accelerateMotorStepOn = false;
@@ -496,6 +510,7 @@ float calculateStopDistance() {
     return remainingDistance;
 }
 
+
 void loop() {
     updateDisplayStep();
     updateMetersStep();
@@ -505,4 +520,5 @@ void loop() {
     accelerateMotorStep();
 
     blinkLEDStep();
+    tonesStep();
 }
