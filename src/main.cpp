@@ -39,6 +39,7 @@ const unsigned long debounceDelay = 0;  // Минимальная задержк
 // OLED reset pin (set to -1 if not used)
 #define OLED_RESET -1
 
+Buzzer buzzer(10, 2); // Используем GPIO10 и второй PWM-канал (канал 1)
 
 
 void clearMemory();
@@ -163,12 +164,10 @@ void setup() {
     // Кнопки
     // attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
     // attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
-
-    pinMode(buzzerPin, OUTPUT);
+ 
 }
 
  
-
 
 void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency) {
 
@@ -178,8 +177,6 @@ void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency) {
         totalRevolutions += revolutions / 800;
     }
 }
-
-
 
 /* Стстаус остановки по памяти 0 - небыло остановки 1 - была остановка */
 bool isStopedOnMem = false;
@@ -195,7 +192,7 @@ void updateMetersStep() {
             isStopedOnMem = true;
             stopWinding();
           
-            execAutoStopWindingTone=true;
+            buzzer.startAutoStopWindingTone();
           
            // totalRevolutions = 0; 
            // isStopedOnMem = false;
@@ -240,7 +237,7 @@ void updateDisplayStep() {
 }
 
 void onButtonPress() {
-    execKeyTone=true;
+    buzzer.startKeyTone();
     if (!isRunning) {
         startWinding();
     }
@@ -252,6 +249,7 @@ void onButtonPress() {
 void onButtonLongPress() {
     totalRevolutions=0;
     blinkLED(2);
+    buzzer.startLongKeyTone();
 }
 
 /** Стираем память*/
@@ -261,7 +259,7 @@ void onMemButtonLongPress() {
     EEPROM.put(0, maxRevolutions);
     EEPROM.commit();
     blinkLED(2);
-    execKeyTone=true;
+    buzzer.startLongMemKeyTone();
 }
 
 /** Читаем из памяти */
@@ -280,7 +278,8 @@ void onMemButtonPress() {
     EEPROM.commit();
     totalRevolutions = 0;
 
-    delay(200);
+    //delay(200);
+    buzzer.startMemKeyTone();
  
 }
 
@@ -367,20 +366,16 @@ void startWinding() {
     accelerateMotor();
 }
 
- 
-
 void stopWinding() {
     decelerateMotor();
     isRunning = false;
     isPaused = false;
 }
 
- 
-
 void clearMemory() {
     currentRunTime = 0;
     blinkLED(3);
-    execMemoryClearTone=true;
+    buzzer.startMemoryClearTone();
 }
 
 bool accelerateMotorStepOn = false;
@@ -494,9 +489,6 @@ void updateDisplay() {
     lastDisplay[4] = line5;
 }
 
-
-
-
 float calculateStopDistance() {
     float remainingDistance = 0.0;
     int freq = curFrequency;
@@ -510,7 +502,6 @@ float calculateStopDistance() {
     return remainingDistance;
 }
 
-
 void loop() {
     updateDisplayStep();
     updateMetersStep();
@@ -520,5 +511,6 @@ void loop() {
     accelerateMotorStep();
 
     blinkLEDStep();
-    tonesStep();
+    
+    buzzer.update(); 
 }
