@@ -55,18 +55,18 @@ void Buzzer::autoStopWindingTone() {
     if (!execAutoStopWindingTone) return;
 
     unsigned long currentMillis = millis();
-    if (step % 2 == 0 && currentMillis - lastTime >= 100) {
+    if (step % 2 == 0 && currentMillis - lastTime >= 50) {
         frequency = (toneStep % 2 == 0) ? 4000 : 2000;
         ledcWriteTone(pwmChannel, frequency); // Задать частоту через PWM канал
         lastTime = currentMillis;
         step++;
         toneStep++;
     }
-    else if (step % 2 == 1 && currentMillis - lastTime >= 100) {
+    else if (step % 2 == 1 && currentMillis - lastTime >= 50) {
         ledcWrite(pwmChannel, 0); // Останавливаем звук
         lastTime = currentMillis;
         step++;
-    }
+    } 
 
     if (step >= 60) {  // Завершаем после 60 шагов
         step = 0;
