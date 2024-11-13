@@ -51,6 +51,13 @@ void Buzzer::startLongMemKeyTone() {
     lastTime = millis();
 }
 
+void Buzzer::startErrorTone() {
+    execErrorTone = true;
+    step = 0;
+    lastTime = millis();
+}
+
+
 void Buzzer::autoStopWindingTone() {
     if (!execAutoStopWindingTone) return;
 
@@ -118,8 +125,36 @@ void Buzzer::keyTone() {
     }
 }
 
+
+void Buzzer::errorTone() {
+    if (!execErrorTone) return;
+
+    unsigned long currentMillis = millis();
+    if (step == 0 && currentMillis - lastTime >= 100) {
+        ledcWriteTone(pwmChannel, 400); // Низкий гудок
+        lastTime = currentMillis;
+        step = 1;
+    }
+    else if (step == 1 && currentMillis - lastTime >= 200) {
+        ledcWrite(pwmChannel, 0); // Остановка звука
+        lastTime = currentMillis;
+        step = 2;
+    }
+    else if (step == 2 && currentMillis - lastTime >= 100) {
+        ledcWriteTone(pwmChannel, 400); // Второй низкий гудок
+        lastTime = currentMillis;
+        step = 3;
+    }
+    else if (step == 3 && currentMillis - lastTime >= 200) {
+        ledcWrite(pwmChannel, 0); // Завершение звука
+        step = 0;
+        execErrorTone = false;
+    }
+}
+
 void Buzzer::update() {
     autoStopWindingTone();
     memoryClearTone();
     keyTone();
+    errorTone();
 }

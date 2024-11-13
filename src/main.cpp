@@ -8,7 +8,7 @@
 #include "Buzzer.h"
 
 #define STEP_PIN 2        // Пин для STEP драйвера A4988
-#define DIR_PIN 3         // Пин для DIR драйвера A4988
+#define DIR_PIN 1         // Пин для DIR драйвера A4988
 #define BUTTON_PIN 4      // Пин для кнопки старт/стоп
 #define MEM_BUTTON_PIN 5  // Пин для кнопки памяти
 #define STEPS_PER_REV 800 // Количество шагов на один оборот двигателя
@@ -33,7 +33,7 @@ bool memoryCleared = false; // Флаг очистки памяти
 float totalRevolutions = 0; // Общее количество оборотов
 float maxRevolutions = 0;   // Максимальное количество оборотов
 
-unsigned long longPressDuration = 1500; // Время для долгого нажатия
+unsigned long longPressDuration = 1000; // Время для долгого нажатия
 const unsigned long debounceDelay = 0;  // Минимальная задержка для антидребезга в миллисекундах
 
 // OLED reset pin (set to -1 if not used)
@@ -44,11 +44,11 @@ Buzzer buzzer(10, 2); // Используем GPIO10 и второй PWM-кан�
 
 void clearMemory();
 void startWinding();
- 
+
 void stopWinding();
 void accelerateMotor();
 void decelerateMotor();
- 
+
 
 void updateDisplay();
 void loadMem();
@@ -57,6 +57,7 @@ void handleInterruptPinStart();
 void handleInterruptPinMem();
 
 float calculateStopDistance();
+void onMemButtonPress();
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 U8G2_FOR_ADAFRUIT_GFX u8g2; // Создаем объект для работы с кириллицей
@@ -66,9 +67,9 @@ DynamicJsonDocument jsonData(512);
 
 // Переменные для хранения предыдущих строк
 String lastDisplay[5] = { "", "", "", "", "" };
- 
 
- // Мигание диодом
+
+// Мигание диодом
 bool blinkLED_isBlinking = false;           // Флаг, указывающий на активное мигание
 int blinkLED_count = 0;                     // Счетчик оставшихся миганий
 uint32_t blinkLED_delay = 200;              // Задержка между миганиями
@@ -80,7 +81,7 @@ void blinkLED(int times, uint32_t delayMs = 200) {
     blinkLED_count = times * 2;               // Устанавливаем общее количество изменений состояния (вкл/выкл)
     blinkLED_delay = delayMs;                 // Устанавливаем задержку для мигания
     blinkLED_lastBlinkTime = millis();        // Фиксируем текущее время
-} 
+}
 
 void blinkLEDStep() {
     if (blinkLED_isBlinking && (millis() - blinkLED_lastBlinkTime >= blinkLED_delay)) {
@@ -88,12 +89,12 @@ void blinkLEDStep() {
         digitalWrite(LED_PIN, blinkLED_state);          // Обновляем состояние LED
         blinkLED_lastBlinkTime = millis();              // Обновляем время для следующего шага
         blinkLED_count--;                               // Уменьшаем счетчик миганий
- 
+
 
         if (blinkLED_count <= 0) {                      // Если мигания закончились
             blinkLED_isBlinking = false;                // Останавливаем мигание
             digitalWrite(LED_PIN, HIGH);                // Устанавливаем LED в исходное состояние
-           
+
         }
     }
 }
@@ -117,7 +118,7 @@ void setup() {
     Serial.println(F("ESP Starting..."));
 
     digitalWrite(DIR_PIN, HIGH); // Устанавливаем направление вращения
-    digitalWrite(LED_PIN, HIGH); // Устанавливаем направление вращения
+    digitalWrite(LED_PIN, HIGH);
 
     // Настройка ШИМ на STEP_PIN
     ledcSetup(0, frequency, 8); // Канал 0, частота 1 кГц, разрешение 8 бит
@@ -164,10 +165,10 @@ void setup() {
     // Кнопки
     // attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterruptPinStart, CHANGE);
     // attachInterrupt(digitalPinToInterrupt(MEM_BUTTON_PIN), handleInterruptPinMem, CHANGE);
- 
+
 }
 
- 
+
 
 void calculateRevolutions(unsigned long lastUpdateTime, float curFrequency) {
 
@@ -185,19 +186,19 @@ void updateMetersStep() {
 
     if (millis() - lastTime > 10) {
         calculateRevolutions(lastTime, curFrequency);
-       // float stopDistance = calculateStopDistance();
-       float stopDistance=2.207749;
+        // float stopDistance = calculateStopDistance();
+        float stopDistance = 2.207749;
 
-        if (maxRevolutions > 0 && totalRevolutions+stopDistance >= maxRevolutions && !isStopedOnMem) {
+        if (maxRevolutions > 0 && totalRevolutions + stopDistance >= maxRevolutions && !isStopedOnMem) {
             isStopedOnMem = true;
             stopWinding();
-          
-            buzzer.startAutoStopWindingTone();
-          
-           // totalRevolutions = 0; 
-           // isStopedOnMem = false;
 
-           // Serial.printf("Motor autostop: %f\n calcDistance: %f\n sum:%f\n max:%f\n", totalRevolutions,stopDistance,totalRevolutions+stopDistance,maxRevolutions);
+            buzzer.startAutoStopWindingTone();
+
+            // totalRevolutions = 0; 
+            // isStopedOnMem = false;
+
+            // Serial.printf("Motor autostop: %f\n calcDistance: %f\n sum:%f\n max:%f\n", totalRevolutions,stopDistance,totalRevolutions+stopDistance,maxRevolutions);
             Serial.printf("Motor autostop: %f", totalRevolutions);
         }
         lastTime = millis();
@@ -221,8 +222,8 @@ void updateDisplayStep() {
         else {
             jsonData["time"]["value"] = String("0");
         }*/
-        float percent=round((float)totalRevolutions / (float)maxRevolutions * 100);
-        
+        float percent = round((float)totalRevolutions / (float)maxRevolutions * 100);
+
         jsonData["time"]["value"] = maxRevolutions > 0 ? percent : 0;
 
 
@@ -237,17 +238,17 @@ void updateDisplayStep() {
 }
 
 void onButtonPress() {
-    buzzer.startKeyTone();
     if (!isRunning) {
         startWinding();
     }
     else {
         stopWinding();
     }
+    buzzer.startKeyTone();
 }
 
 void onButtonLongPress() {
-    totalRevolutions=0;
+    totalRevolutions = 0;
     blinkLED(2);
     buzzer.startLongKeyTone();
 }
@@ -255,7 +256,7 @@ void onButtonLongPress() {
 /** Стираем память*/
 void onMemButtonLongPress() {
     maxRevolutions = 0;
-   // totalRevolutions = 0;
+    // totalRevolutions = 0;
     EEPROM.put(0, maxRevolutions);
     EEPROM.commit();
     blinkLED(2);
@@ -270,18 +271,6 @@ void loadMem() {
     }
 }
 
-void onMemButtonPress() {
-    maxRevolutions = totalRevolutions;
-    Serial.print("Сохраняем значение... ");
-    Serial.println(maxRevolutions);
-    EEPROM.put(0, maxRevolutions);
-    EEPROM.commit();
-    totalRevolutions = 0;
-
-    //delay(200);
-    buzzer.startMemKeyTone();
- 
-}
 
 volatile bool startLongTask = false; // Флаг для запуска долгой задачи
 void (*longTaskFunc)() = nullptr;    // Указатель на долгую функцию
@@ -378,28 +367,35 @@ void clearMemory() {
     buzzer.startMemoryClearTone();
 }
 
+
 bool accelerateMotorStepOn = false;
 int accelerateMotorStep_freq = 0;
 int accelerateMotorStep_step = accelStep;
 int accelerateMotorStep_max = maxFrequency;
-void accelerateMotorStep() {
-    if (accelerateMotorStepOn) {
-        if ((accelerateMotorStep_step > 0 && accelerateMotorStep_freq >= accelerateMotorStep_max) || (accelerateMotorStep_step < 0 && accelerateMotorStep_freq <= accelerateMotorStep_max)) {
-            accelerateMotorStepOn = false;
-            if (isStopedOnMem){
-                isStopedOnMem=false;
-                  Serial.printf("Motor autostop 2: %f\n", totalRevolutions);
-                totalRevolutions=0;
-            }
-        }
-        // Serial.printf("Motor freq: %d\n",accelerateMotorStep_freq);
-        ledcWriteTone(0, accelerateMotorStep_freq); // Изменяем частоту ШИМ для плавного разгона
-        curFrequency = accelerateMotorStep_freq;
-        delay(accelDelayStep);
-       // updateDisplayStep();
-      //  updateMetersStep();
+unsigned long lastAccelTime = 0;
 
-        accelerateMotorStep_freq += accelerateMotorStep_step;
+void accelerateMotorStep() {
+
+    if (accelerateMotorStepOn) {
+        unsigned long currentMillis = millis();
+        if (currentMillis - lastAccelTime >= accelDelayStep) {
+            lastAccelTime = currentMillis; 
+
+            if ((accelerateMotorStep_step > 0 && accelerateMotorStep_freq >= accelerateMotorStep_max) || (accelerateMotorStep_step < 0 && accelerateMotorStep_freq <= accelerateMotorStep_max)) {
+                accelerateMotorStepOn = false;
+                if (isStopedOnMem) {
+                    isStopedOnMem = false;
+                    Serial.printf("Motor autostop 2: %f\n", totalRevolutions);
+                    totalRevolutions = 0;
+                }
+            }
+            ledcWriteTone(0, accelerateMotorStep_freq);
+            curFrequency = accelerateMotorStep_freq;
+
+            //delay(accelDelayStep);
+
+            accelerateMotorStep_freq += accelerateMotorStep_step;
+        }
     }
 }
 
@@ -408,7 +404,7 @@ void accelerateMotor() {
     accelerateMotorStep_step = accelStep;
     accelerateMotorStep_max = maxFrequency;
     accelerateMotorStepOn = true;
-    accelDelayStep=accelDelay;
+    accelDelayStep = accelDelay;
 }
 
 void decelerateMotor() {
@@ -416,18 +412,18 @@ void decelerateMotor() {
     accelerateMotorStep_step = -accelStep;
     accelerateMotorStep_max = 0;
     accelerateMotorStepOn = true;
-    accelDelayStep=decelDelay;
+    accelDelayStep = decelDelay;
 }
 
 // Работа с экраном
 
 void displayProgressBar(int percentage) {
-   // display.clearDisplay(); // Очищаем экран
-      int BAR_X = 0;
-      int BAR_Y = 18;
-      int PROGRESS_BAR_WIDTH = 128;
-      int PROGRESS_BAR_HEIGHT = 10;
-    
+    // display.clearDisplay(); // Очищаем экран
+    int BAR_X = 0;
+    int BAR_Y = 18;
+    int PROGRESS_BAR_WIDTH = 128;
+    int PROGRESS_BAR_HEIGHT = 10;
+
     // Отображаем процент прогресса
    // display.setTextSize(1);
    // display.setTextColor(SSD1306_WHITE);
@@ -450,37 +446,37 @@ void displayProgressBar(int percentage) {
 void updateDisplay() {
     //String line1 = String(jsonData["time"]["label"].as<const char*>()) + ": " + String(jsonData["time"]["value"].as<const char*>()) ;
     String line1 = "";
-    String line2 = String(jsonData["meters"]["label"].as<const char*>()) + ": " + String(jsonData["meters"]["value"].as<int>()) ;
-    String line3 = String(jsonData["isrunning"]["label"].as<const char*>()) + ": " + String(jsonData["isrunning"]["value"].as<const char*>()) ;
+    String line2 = String(jsonData["meters"]["label"].as<const char*>()) + ": " + String(jsonData["meters"]["value"].as<int>());
+    String line3 = String(jsonData["isrunning"]["label"].as<const char*>()) + ": " + String(jsonData["isrunning"]["value"].as<const char*>());
     String line4 = String(jsonData["freq"]["label"].as<const char*>()) + ": " + String(jsonData["freq"]["value"].as<int>());
-    String line5 = String(jsonData["maxMeters"]["label"].as<const char*>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>()) ;
+    String line5 = String(jsonData["maxMeters"]["label"].as<const char*>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>());
 
     //if ( line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3] || line5 != lastDisplay[4]) {
 
-        int lineHeight = 11;
-        display.clearDisplay();
-        //u8g2.setFont(u8g2_font_6x12_t_cyrillic);
+    int lineHeight = 11;
+    display.clearDisplay();
+    //u8g2.setFont(u8g2_font_6x12_t_cyrillic);
 
-        u8g2.setFont(u8g2_font_10x20_t_cyrillic);
-        u8g2.setCursor(0, 15);
-        u8g2.print(String(String(jsonData["meters"]["value"].as<int>()) + " м."));
+    u8g2.setFont(u8g2_font_10x20_t_cyrillic);
+    u8g2.setCursor(0, 15);
+    u8g2.print(String(String(jsonData["meters"]["value"].as<int>()) + " м."));
 
-        u8g2.setFont(u8g2_font_6x12_t_cyrillic);
-        //u8g2.setCursor(0, 16 + lineHeight * 1);
-       // u8g2.print(line1);
-       displayProgressBar(jsonData["time"]["value"]);
+    u8g2.setFont(u8g2_font_6x12_t_cyrillic);
+    //u8g2.setCursor(0, 16 + lineHeight * 1);
+   // u8g2.print(line1);
+    displayProgressBar(jsonData["time"]["value"]);
 
-        u8g2.setCursor(0, 16 + lineHeight * 2);
-        u8g2.print(line3);
+    u8g2.setCursor(0, 16 + lineHeight * 2);
+    u8g2.print(line3);
 
-        u8g2.setCursor(0, 16 + lineHeight * 3);
-        u8g2.print(line4);
+    u8g2.setCursor(0, 16 + lineHeight * 3);
+    u8g2.print(line4);
 
-        u8g2.setCursor(0, 16 + lineHeight * 4);
-        u8g2.print(line5);
+    u8g2.setCursor(0, 16 + lineHeight * 4);
+    u8g2.print(line5);
 
-        display.display();
-   // }
+    display.display();
+    // }
 
     lastDisplay[0] = line1;
     lastDisplay[1] = line2;
@@ -502,6 +498,24 @@ float calculateStopDistance() {
     return remainingDistance;
 }
 
+
+void onMemButtonPress() {
+
+    if (isRunning || accelerateMotorStepOn) {
+        buzzer.startErrorTone();
+        return;
+    }
+    maxRevolutions = totalRevolutions;
+    Serial.print("Сохраняем значение... ");
+    Serial.println(maxRevolutions);
+    EEPROM.put(0, maxRevolutions);
+    EEPROM.commit();
+    totalRevolutions = 0;
+    buzzer.startMemKeyTone();
+    delay(100);
+
+}
+
 void loop() {
     updateDisplayStep();
     updateMetersStep();
@@ -511,6 +525,6 @@ void loop() {
     accelerateMotorStep();
 
     blinkLEDStep();
-    
-    buzzer.update(); 
+
+    buzzer.update();
 }
