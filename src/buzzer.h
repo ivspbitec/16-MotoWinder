@@ -15,6 +15,7 @@ public:
     void startMemKeyTone();
     void startLongMemKeyTone();    
     void startErrorTone(); // Объявление новой функции для сигнала ошибки
+    void startSecondTone(); // звук метронома
     
     void update();
 
@@ -30,6 +31,7 @@ private:
     bool execAutoStopWindingTone = false;
     bool execMemoryClearTone = false;
     bool execKeyTone = false;
+    bool execSecondTone = false;
     bool execErrorTone = false;
 
     unsigned long lastTime = 0;
@@ -41,6 +43,7 @@ private:
     void memoryClearTone();
     void keyTone();
     void errorTone();
+    void secondTone();
 };
 
 #endif // BUZZER_H

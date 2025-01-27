@@ -30,6 +30,13 @@ void Buzzer::startKeyTone() {
     lastTime = millis();
 }
 
+void Buzzer::startSecondTone() {
+    execSecondTone = true;
+    keyToneD=25;
+    keyToneF=500;
+    lastTime = millis();
+}
+
 void Buzzer::startLongKeyTone() {
     execKeyTone = true;
     keyToneD=200;
@@ -126,6 +133,25 @@ void Buzzer::keyTone() {
 }
 
 
+void Buzzer::secondTone() {
+
+     
+    if (!execSecondTone) return;
+
+    unsigned long currentMillis = millis();
+    if (step == 0) {
+        ledcWriteTone(pwmChannel, keyToneF);
+        lastTime = currentMillis;
+        step = 1;
+    }
+    else if (step == 1 && currentMillis - lastTime >= keyToneD) {
+        ledcWrite(pwmChannel, 0);
+        execSecondTone = false;
+        step = 0;
+    }
+}
+
+
 void Buzzer::errorTone() {
     if (!execErrorTone) return;
 
@@ -157,4 +183,5 @@ void Buzzer::update() {
     memoryClearTone();
     keyTone();
     errorTone();
+    secondTone();
 }

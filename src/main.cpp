@@ -17,7 +17,9 @@
 #define SCREEN_HEIGHT 64
 
 int frequency = 0;                // Начальная частота ШИМ (частота шагов)
-int maxFrequency = 10000;         // Максимальная частота ШИМ для полной скорости
+int frequencies[] = {2500, 5000, 10000, 12500};  // Возможные частоты
+int currentFrequencyIndex = 2;              // Начинаем с 10 000 Гц (индекс 2)
+int maxFrequency = frequencies[currentFrequencyIndex];  // Максимальная частота ШИМ для полной скорости
 int curFrequency = 0;             // Текущая частота ШИМ для полной скорости
 int accelDelay = 15;              // Задержка для плавного изменения скорости (мс)
 int decelDelay = 3;               // Задержка для плавного изменения скорости (мс)
@@ -33,6 +35,7 @@ bool memoryCleared = false; // Флаг очистки памяти
 float totalRevolutions = 0; // Общее количество оборотов
 float maxRevolutions = 0;   // Максимальное количество оборотов
 
+unsigned long superLongPressDuration = 3000; // Время для очень долгого нажатия
 unsigned long longPressDuration = 1000; // Время для долгого нажатия
 const unsigned long debounceDelay = 0;  // Минимальная задержка для антидребезга в миллисекундах
 
@@ -252,6 +255,14 @@ void onButtonLongPress() {
     blinkLED(2);
     buzzer.startLongKeyTone();
 }
+/** Переключение скорости*/
+void onButtonSuperLongPress() {
+    currentFrequencyIndex = (currentFrequencyIndex + 1) % 4;  
+    maxFrequency = frequencies[currentFrequencyIndex];       
+    blinkLED(1);
+    buzzer.startKeyTone();
+    updateDisplay();
+}
 
 /** Стираем память*/
 void onMemButtonLongPress() {
@@ -261,6 +272,11 @@ void onMemButtonLongPress() {
     EEPROM.commit();
     blinkLED(2);
     buzzer.startLongMemKeyTone();
+}
+
+/** ?*/
+void onMemButtonSuperLongPress() {
+   
 }
 
 /** Читаем из памяти */
@@ -281,7 +297,7 @@ void IRAM_ATTR requestLongTask(void (*func)()) {
     startLongTask = true; // Устанавливаем флаг
 }
 
-void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long& dbTime, unsigned long& lpTime, void (*shortPressFunc)(), void (*longPressFunc)()) {
+void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long& dbTime, unsigned long& lpTime, void (*shortPressFunc)(), void (*longPressFunc)(), void (*superLongPressFunc)()) {
 
     unsigned long currentTime = millis();
     if (currentTime - dbTime > debounceDelay) {
@@ -289,24 +305,34 @@ void IRAM_ATTR checkButtonStep(uint8_t pin, unsigned long& dbTime, unsigned long
         int buttonState = digitalRead(pin);
 
         // Serial.printf("iPin=%d iState=%d\n", pin, buttonState);
+//buzzer.startKeyTone();
+
 
         if (buttonState == LOW && lpTime == 0) {
             lpTime = millis();
         }
 
+        if (lpTime > 0 && (currentTime - lpTime) % 1000 < 5) {
+            buzzer.startSecondTone();
+        }
+        
         if (buttonState == HIGH && lpTime > 0) {
             unsigned long pressDuration = millis() - lpTime;
 
-            if (pressDuration >= longPressDuration) {
+            if (pressDuration >= longPressDuration && pressDuration < superLongPressDuration) {
                 Serial.printf("longpress\n");
 
                 // requestLongTask(longPressFunc);
                 longPressFunc();
             }
             else {
-                Serial.printf("press\n");
-                // requestLongTask(shortPressFunc)
-                shortPressFunc();
+                if (pressDuration >= superLongPressDuration){
+                    superLongPressFunc();
+                }else{
+                    Serial.printf("press\n");
+                    // requestLongTask(shortPressFunc)
+                    shortPressFunc();
+                }
             }
             lpTime = 0; // Сброс времени нажатия
         }
@@ -330,8 +356,8 @@ checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButto
 }*/
 
 void checkButtonsStep() {
-    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress);
-    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress);
+    checkButtonStep(BUTTON_PIN, lastPressDbTimeButton, lastPressTimeButton, onButtonPress, onButtonLongPress, onButtonSuperLongPress);
+    checkButtonStep(MEM_BUTTON_PIN, lastPressDbTimeMem, lastPressTimeMem, onMemButtonPress, onMemButtonLongPress, onMemButtonSuperLongPress);
 }
 
 void longFunctionStep() {
@@ -448,7 +474,7 @@ void updateDisplay() {
     String line1 = "";
     String line2 = String(jsonData["meters"]["label"].as<const char*>()) + ": " + String(jsonData["meters"]["value"].as<int>());
     String line3 = String(jsonData["isrunning"]["label"].as<const char*>()) + ": " + String(jsonData["isrunning"]["value"].as<const char*>());
-    String line4 = String(jsonData["freq"]["label"].as<const char*>()) + ": " + String(jsonData["freq"]["value"].as<int>());
+    String line4 = String(jsonData["freq"]["label"].as<const char*>()) + ": " + String(jsonData["freq"]["value"].as<int>())+" ("+String(maxFrequency)+")";
     String line5 = String(jsonData["maxMeters"]["label"].as<const char*>()) + ": " + String(jsonData["maxMeters"]["value"].as<int>());
 
     //if ( line1 != lastDisplay[0] || line2 != lastDisplay[1] || line3 != lastDisplay[2] || line4 != lastDisplay[3] || line5 != lastDisplay[4]) {
